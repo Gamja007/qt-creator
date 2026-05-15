@@ -11,6 +11,7 @@
 
 #include <coreplugin/actionmanager/actioncontainer.h>
 #include <coreplugin/actionmanager/actionmanager.h>
+#include <coreplugin/outputwindow.h>
 
 #include <projectexplorer/devicesupport/devicemanager.h>
 #include <projectexplorer/devicesupport/idevice.h>
@@ -50,6 +51,15 @@ static CommandLine adbLogcat(const QString &serialNumber, const QStringList &ext
     return {AndroidConfig::adbToolPath(), adbSelector(serialNumber) + QStringList{"logcat"} + extra};
 }
 
+struct LogcatEntry
+{
+    QString line; //"(pid)" already stripped
+    Utils::OutputFormat fmt;
+    QChar level;
+    qint32 pid = -1;
+    bool bypassFilter = false;
+};
+
 static const QRegularExpression regExpLogcat(
     "^"                     // line start
     "(?:\\x1b\\[[0-9;]*m)?" // optional ANSI color
@@ -58,6 +68,28 @@ static const QRegularExpression regExpLogcat(
     "([^(]*)"               // tag
     "\\(\\s*(\\d+)\\s*\\)"  // PID
 );
+
+// Parse a raw logcat line into a LogcatEntry, stripping the "(pid)" segment
+// so the stored line reads "level/tag: message".
+static LogcatEntry parseLogcat(const QString &raw)
+{
+    LogcatEntry e{.line = raw};
+    const auto match = regExpLogcat.match(raw);
+    if (match.hasMatch()) {
+        e.level = match.captured(1).at(0);
+        bool ok = false;
+        if (const int pid = match.captured(3).toInt(&ok); ok)
+            e.pid = pid;
+        const int from = e.line.indexOf(QLatin1Char('('));
+        const int to = e.line.indexOf(QLatin1Char(')'), from);
+        if (from >= 0 && to > from)
+            e.line.remove(from, to - from + 1);
+    }
+    const bool isError = e.level == QLatin1Char('W') || e.level == QLatin1Char('E')
+                         || e.level == QLatin1Char('F');
+    e.fmt = isError ? Utils::StdErrFormat : Utils::StdOutFormat;
+    return e;
+}
 
 static QString logcatTitle(const QString &label)
 {
@@ -84,8 +116,42 @@ static AndroidDeviceConstPtr asReadyAndroidDevice(const IDeviceConstPtr &device)
     return std::dynamic_pointer_cast<const AndroidDevice>(device);
 }
 
-//LogcatStream
+//LogcatFilter
+class LogcatFilter
+{
+public:
+    void setFromText(const QString &text);
+    bool accepts(const LogcatEntry &entry) const;
 
+    QString cachedText() const { return m_cachedText; }
+    bool isActive() const { return !m_predicates.isEmpty(); }
+
+    using FilterPredicate = std::function<bool(const LogcatEntry &)>;
+
+private:
+    QList<FilterPredicate> m_predicates;
+    // this is going to be used as package:com.domain.package in upcoming commits.
+    // To indicate that the application is bound with this
+    QString m_cachedText;
+};
+
+void LogcatFilter::setFromText(const QString &text)
+{
+    m_cachedText = text;
+    m_predicates.clear();
+}
+
+bool LogcatFilter::accepts(const LogcatEntry &entry) const
+{
+    if (entry.bypassFilter)
+        return true;
+    for (const FilterPredicate &filterPredicate : m_predicates)
+        if (!filterPredicate(entry))
+            return false;
+    return true;
+}
+
+//LogcatStream
 class LogcatStream : public QObject
 {
 public:
@@ -102,17 +168,24 @@ public:
     void setTab(RunControl *tab);
     void setTabActive(bool active);
 
-    void postMessage(const QString &msg, Utils::OutputFormat fmt)
-    {
-        if (m_tabContext.tab)
-            m_tabContext.tab->postMessage(msg, fmt, false);
-    }
+    void postMessage(const QString &msg, Utils::OutputFormat fmt);
 
 private:
     struct TabContext
     {
         QPointer<RunControl> tab;
         bool active = false;
+        QList<LogcatEntry> buffer;
+        LogcatFilter filter;
+
+        void appendEntry(const LogcatEntry &entry);
+        void applyFilter() const;
+        void renderFromBuffer() const;
+
+        QString windowFilterText() const
+        {
+            return filter.isActive() ? QString() : filter.cachedText();
+        }
     };
     enum class Lifecycle { Stop, Start };
 
@@ -123,6 +196,8 @@ private:
 
     void onDisconnected();
     void onConnected();
+
+    void onOutputFilterTextChanged(const QString &text);
 
     const AndroidDeviceConstPtr m_device;
     std::unique_ptr<QTaskTree> m_task;
@@ -176,6 +251,10 @@ void LogcatStream::setTab(RunControl *tab)
         setTabActive(active);
     });
 
+    QObject::connect(tab, &RunControl::outputFilterChanged, this, [this](const QString &text) {
+        onOutputFilterTextChanged(text);
+    });
+
     QObject::connect(tab, &QObject::destroyed, this, [this] {
         setTab(nullptr);
         deleteLater();
@@ -227,6 +306,49 @@ void LogcatStream::onConnected()
         start();
 }
 
+void LogcatStream::postMessage(const QString &msg, Utils::OutputFormat fmt)
+{
+    m_tabContext.appendEntry({.line = msg, .fmt = fmt, .bypassFilter = true});
+}
+
+void LogcatStream::TabContext::appendEntry(const LogcatEntry &entry)
+{
+    static constexpr int kMaxBufferedLines = 10000;
+    buffer.append(entry);
+    if (buffer.size() > kMaxBufferedLines)
+        buffer.removeFirst();
+    if (tab && filter.accepts(entry))
+        tab->postMessage(entry.line, entry.fmt, false);
+}
+
+void LogcatStream::TabContext::applyFilter() const
+{
+    if (!tab)
+        return;
+    tab->setOutputFilterText(filter.cachedText());
+    if (OutputWindow *const w = tab->outputWindow())
+        w->updateFilterProperties(windowFilterText(), Qt::CaseInsensitive, false, false, 0, 0);
+}
+
+void LogcatStream::TabContext::renderFromBuffer() const
+{
+    applyFilter();
+    OutputWindow *const w = tab ? tab->outputWindow() : nullptr;
+    if (!w)
+        return;
+    w->clear();
+    for (const LogcatEntry &entry : buffer) {
+        if (filter.accepts(entry))
+            tab->postMessage(entry.line, entry.fmt, false);
+    }
+}
+
+void LogcatStream::onOutputFilterTextChanged(const QString &text)
+{
+    m_tabContext.filter.setFromText(text);
+    m_tabContext.renderFromBuffer();
+}
+
 void LogcatStream::startAdbTail()
 {
     const QString serialNumber = serial();
@@ -252,22 +374,7 @@ void LogcatStream::stopAdbTail()
 
 void LogcatStream::parseLine(const QString &raw)
 {
-    if (!m_tabContext.tab)
-        return;
-    const auto match = regExpLogcat.match(raw);
-    const auto level = match.hasMatch() ? match.captured(1).at(0) : QChar();
-
-    auto line = raw;
-    if (match.hasMatch()) {
-        //strip pid so the rendered line is "level/tag: message" for now
-        const auto from = line.indexOf(QLatin1Char('('));
-        const auto to = line.indexOf(QLatin1Char(')'), from);
-        if (from >= 0 && to > from)
-            line.remove(from, to - from + 1);
-    }
-    const auto isError = level == QLatin1Char('W') || level == QLatin1Char('E')
-                         || level == QLatin1Char('F');
-    m_tabContext.tab->postMessage(line, isError ? Utils::StdErrFormat : Utils::StdOutFormat, false);
+    m_tabContext.appendEntry(parseLogcat(raw));
 }
 
 static LogcatStream *ensureStream(const AndroidDeviceConstPtr &device)
@@ -294,7 +401,6 @@ static RunControl *openLogcatTabForStream(LogcatStream *logcatStream)
     auto *runControl = new RunControl(ProjectExplorer::Constants::NORMAL_RUN_MODE);
     runControl->setDisplayName(logcatTitle(logcatStream->tabLabel()));
     runControl->setPromptToStop([](bool *) { return true; });
-    runControl->setRunControlsEnabled(false);
     logcatStream->setTab(runControl);
 
     QPointer<RunControl> rcPtr = runControl;
