@@ -121,24 +121,73 @@ class LogcatFilter
 {
 public:
     void setFromText(const QString &text);
+    void bindToPackage(qint64 pid, const QString &packageName);
+    void clear();
     bool accepts(const LogcatEntry &entry) const;
 
     QString cachedText() const { return m_cachedText; }
+    QString keyword() const { return m_keyword; }
     bool isActive() const { return !m_predicates.isEmpty(); }
+    bool isBoundToApp() const { return !m_boundPackage.isEmpty(); }
 
     using FilterPredicate = std::function<bool(const LogcatEntry &)>;
 
 private:
     QList<FilterPredicate> m_predicates;
+    qint64 m_pid = -1;
+    QString m_boundPackage;
     // this is going to be used as package:com.domain.package in upcoming commits.
     // To indicate that the application is bound with this
     QString m_cachedText;
+    QString m_keyword; // tail after "package:<name>", forwarded to OutputWindow as a literal
 };
+
+//add more kinds of filters (tag,level, ...)
+static LogcatFilter::FilterPredicate pidPredicate(qint64 pid)
+{
+    return [pid](const LogcatEntry &e) { return e.pid == pid; };
+}
 
 void LogcatFilter::setFromText(const QString &text)
 {
     m_cachedText = text;
+    m_keyword.clear();
     m_predicates.clear();
+    const QString trimmed = text.trimmed();
+    if (trimmed.isEmpty())
+        return;
+    const QLatin1String pkgPrefix("package:");
+    if (trimmed.startsWith(pkgPrefix, Qt::CaseInsensitive)) {
+        const QString rest = trimmed.mid(pkgPrefix.size()).trimmed();
+        const int sp = rest.indexOf(QChar::Space);
+        const QString name = sp < 0 ? rest : rest.left(sp);
+        m_keyword = sp < 0 ? QString() : rest.mid(sp + 1).trimmed();
+        if (m_pid > 0 && name == m_boundPackage)
+            m_predicates.append(pidPredicate(m_pid));
+    }
+}
+
+void LogcatFilter::bindToPackage(qint64 pid, const QString &packageName)
+{
+    if (pid <= 0) {
+        clear();
+        return;
+    }
+    m_pid = pid;
+    m_boundPackage = packageName;
+    m_cachedText = QStringLiteral("package:") + packageName;
+    m_keyword.clear();
+    m_predicates.clear();
+    m_predicates.append(pidPredicate(pid));
+}
+
+void LogcatFilter::clear()
+{
+    m_predicates.clear();
+    m_pid = -1;
+    m_boundPackage.clear();
+    m_cachedText.clear();
+    m_keyword.clear();
 }
 
 bool LogcatFilter::accepts(const LogcatEntry &entry) const
@@ -168,6 +217,9 @@ public:
     void setTab(RunControl *tab);
     void setTabActive(bool active);
 
+    void bindToApp(qint64 pid, const QString &packageName);
+    void unbindFromApp();
+
     void postMessage(const QString &msg, Utils::OutputFormat fmt);
 
 private:
@@ -184,7 +236,7 @@ private:
 
         QString windowFilterText() const
         {
-            return filter.isActive() ? QString() : filter.cachedText();
+            return filter.isActive() ? filter.keyword() : filter.cachedText();
         }
     };
     enum class Lifecycle { Stop, Start };
@@ -268,9 +320,30 @@ void LogcatStream::setTabActive(bool active)
     if (active == m_tabContext.active)
         return;
     m_tabContext.active = active;
-    if (active)
+    if (active) {
         start();
-    else
+        //window already has the content from before
+        m_tabContext.applyFilter();
+    } else if (!m_tabContext.filter.isBoundToApp()) {
+        stop();
+    }
+}
+
+void LogcatStream::bindToApp(qint64 pid, const QString &packageName)
+{
+    if (pid <= 0 || !m_tabContext.tab)
+        return;
+    m_tabContext.filter.bindToPackage(pid, packageName);
+    m_tabContext.renderFromBuffer();
+}
+
+void LogcatStream::unbindFromApp()
+{
+    if (!m_tabContext.tab)
+        return;
+    m_tabContext.filter.clear();
+    m_tabContext.renderFromBuffer();
+    if (!m_tabContext.active)
         stop();
 }
 
@@ -390,6 +463,14 @@ static LogcatStream *ensureStream(const AndroidDeviceConstPtr &device)
     return stream;
 }
 
+static LogcatStream *findStream(RunControl *runControl)
+{
+    if (!runControl)
+        return nullptr;
+    const IDeviceConstPtr device = runControl->device();
+    return device ? streamRegistry().value(device->id()) : nullptr;
+}
+
 //Tab plumbing
 
 static RunControl *openLogcatTabForStream(LogcatStream *logcatStream)
@@ -439,6 +520,29 @@ static void populateLogcatSubmenu(QMenu *menu)
 }
 
 //Public API
+
+void bindRunningAppToLogcat(RunControl *runControl, qint64 pid, const QString &packageName)
+{
+    if (!runControl || pid <= 0)
+        return;
+    const auto device = asReadyAndroidDevice(runControl->device());
+    if (!device)
+        return;
+    RunControl *const tab = ensureVisibleTab(device);
+    if (!tab)
+        return;
+    LogcatStream *const stream = streamRegistry().value(device->id());
+    if (!stream)
+        return;
+    stream->bindToApp(pid, packageName);
+    tab->showOutputPane();
+}
+
+void unbindRunningAppFromLogcat(RunControl *runControl)
+{
+    if (LogcatStream *const stream = findStream(runControl))
+        stream->unbindFromApp();
+}
 
 void initAndroidLogcat()
 {
