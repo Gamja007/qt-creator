@@ -14,6 +14,9 @@ namespace Android::Internal {
 // Install the Tools > Android > Logcat submenu. Triggering an entry opens
 // (or raises) the Logcat tab for the corresponding ready Android device.
 void initAndroidLogcat();
+
+void prepareForLogcatTab(ProjectExplorer::RunControl *runControl);
+
 void bindRunningAppToLogcat(
     ProjectExplorer::RunControl *runControl, qint64 pid, const QString &packageName);
 void unbindRunningAppFromLogcat(ProjectExplorer::RunControl *runControl);

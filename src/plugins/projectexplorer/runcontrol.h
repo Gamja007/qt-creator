@@ -255,6 +255,7 @@ public:
     Utils::ProcessHandle attachPid() const;
 
     void showOutputPane();
+    void detachOutputPaneTab();
     Canceler canceler();
     void handleProcessCancellation(Utils::Process *process);
 
@@ -272,6 +273,7 @@ signals:
     void canceled();
     void stopped();
     void applicationProcessHandleChanged(QPrivateSignal);
+    void runControlsEnabledChanged();
     void stdOutData(const QByteArray &data);
     //emitted when the visible tab in AppOutputPane changes
     void tabActiveChanged(bool active);

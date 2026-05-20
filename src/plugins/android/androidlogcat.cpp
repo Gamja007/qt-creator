@@ -226,6 +226,10 @@ public:
 
     void postMessage(const QString &msg, Utils::OutputFormat fmt);
 
+    // Detect user Stop vs self-close so Re-run is only offered after a Stop.
+    void onAppCanceled();
+    void onAppStopped();
+
 private:
     bool shouldKeepRunning() const;
 
@@ -283,6 +287,7 @@ private:
     TabContext m_tabContext;
     Lifecycle m_lifecycle = Lifecycle::Stop;
     JdbHandshakeWatcher m_jdb;
+    bool m_appStopRequested = false;
 };
 
 static QHash<Id, LogcatStream *> &streamRegistry()
@@ -308,6 +313,13 @@ LogcatStream::LogcatStream(AndroidDeviceConstPtr device)
         else if (state == IDevice::DeviceReadyToUse)
             onConnected();
     });
+}
+
+static QString deviceLabel(const IDeviceConstPtr &device)
+{
+    if (auto androidDev = std::dynamic_pointer_cast<const AndroidDevice>(device))
+        return QString("%1 - %2").arg(androidDev->displayName(), androidDev->serialNumber());
+    return device ? device->displayName() : QString();
 }
 
 QString LogcatStream::tabLabel() const
@@ -391,6 +403,24 @@ void LogcatStream::clearJdbCallbacks()
     m_jdb = {};
     if (!shouldKeepRunning())
         stop();
+}
+
+void LogcatStream::onAppCanceled()
+{
+    m_appStopRequested = true;
+}
+
+void LogcatStream::onAppStopped()
+{
+    // Self-close (stopped without prior canceled) -> disable so AppOutputPane's
+    // queued runControlFinished hides Re-run on both the app and the tab.
+    if (!m_appStopRequested) {
+        if (auto *appRC = qobject_cast<RunControl *>(sender()))
+            appRC->setRunControlsEnabled(false);
+        if (m_tabContext.tab)
+            m_tabContext.tab->setRunControlsEnabled(false);
+    }
+    m_appStopRequested = false;
 }
 
 void LogcatStream::start()
@@ -520,6 +550,14 @@ static LogcatStream *findStream(RunControl *runControl)
 
 //Tab plumbing
 
+void prepareForLogcatTab(RunControl *runControl)
+{
+    if (!runControl)
+        return;
+    runControl->setDisplayName(logcatTitle(deviceLabel(runControl->device())));
+    runControl->setRunControlsEnabled(false);
+}
+
 static RunControl *openLogcatTabForStream(LogcatStream *logcatStream)
 {
     if (!logcatStream)
@@ -532,9 +570,16 @@ static RunControl *openLogcatTabForStream(LogcatStream *logcatStream)
     logcatStream->setTab(runControl);
 
     QPointer<RunControl> rcPtr = runControl;
-    rcPtr->setRunRecipe(QBarrierTask([](QBarrier &) {}).withCancel([rcPtr] {
+    // QSyncTask flips isRunning true so the Stop button refreshes;
+    // QBarrierTask then waits indefinitely until canceled.
+    const auto reportStarted = QSyncTask([rcPtr] {
+        if (rcPtr)
+            rcPtr->reportStarted();
+    });
+    const auto waitForStop = QBarrierTask([](QBarrier &) {}).withCancel([rcPtr] {
         return makeObjectSignal(rcPtr.data(), &RunControl::canceled);
-    }));
+    });
+    rcPtr->setRunRecipe(Group{reportStarted, waitForStop});
     rcPtr->start();
     return rcPtr;
 }
@@ -545,6 +590,32 @@ static RunControl *ensureVisibleTab(const AndroidDeviceConstPtr &device)
     if (!stream)
         return nullptr;
     return openLogcatTabForStream(stream);
+}
+
+// route logcat through a dedicated stub tab -> detach the runner/debug RC's
+// auto-created tab. AppOutputPane's tab-reuse logic could otherwise repurpose
+// a stopped runner tab for another device's stub (command-line match) and make
+// the original device's logcat disappear. Stop is forwarded to runner.
+static LogcatStream *adoptRunControlAsTab(RunControl *runControl)
+{
+    if (!runControl)
+        return nullptr;
+    LogcatStream *const stream = ensureStream(asReadyAndroidDevice(runControl->device()));
+    if (!stream)
+        return nullptr;
+    if (!stream->tab())
+        openLogcatTabForStream(stream);
+    RunControl *const tab = stream->tab();
+    if (!tab || tab == runControl)
+        return stream;
+    runControl->detachOutputPaneTab();
+    QObject::connect(
+        tab, &RunControl::canceled, runControl, &RunControl::initiateStop, Qt::UniqueConnection);
+    QObject::connect(tab, &RunControl::aboutToStart, runControl, [runControl] {
+        if (runControl->isStopped())
+            runControl->initiateStart();
+    });
+    return stream;
 }
 
 //Menu wiring
@@ -572,17 +643,26 @@ void bindRunningAppToLogcat(RunControl *runControl, qint64 pid, const QString &p
 {
     if (!runControl || pid <= 0)
         return;
-    const auto device = asReadyAndroidDevice(runControl->device());
-    if (!device)
-        return;
-    RunControl *const tab = ensureVisibleTab(device);
-    if (!tab)
-        return;
-    LogcatStream *const stream = streamRegistry().value(device->id());
+    LogcatStream *const stream = adoptRunControlAsTab(runControl);
     if (!stream)
         return;
+    RunControl *const tab = stream->tab();
+    if (tab)
+        tab->showOutputPane();
+    stream->setTabActive(true);
     stream->bindToApp(pid, packageName);
-    tab->showOutputPane();
+
+    if (tab && tab != runControl)
+        tab->setRunControlsEnabled(true);
+
+    QObject::connect(
+        runControl,
+        &RunControl::canceled,
+        stream,
+        &LogcatStream::onAppCanceled,
+        Qt::UniqueConnection);
+    QObject::connect(
+        runControl, &RunControl::stopped, stream, &LogcatStream::onAppStopped, Qt::UniqueConnection);
 }
 
 void unbindRunningAppFromLogcat(RunControl *runControl)
@@ -593,12 +673,9 @@ void unbindRunningAppFromLogcat(RunControl *runControl)
 
 void setJdbCallbacksForLogcat(RunControl *runControl, JdbCallback onWaitChunk, JdbCallback onSettled)
 {
-    if (!runControl)
-        return;
-    LogcatStream *const stream = ensureStream(asReadyAndroidDevice(runControl->device()));
+    LogcatStream *const stream = adoptRunControlAsTab(runControl);
     if (!stream)
         return;
-    openLogcatTabForStream(stream);
     stream->setJdbCallbacks(std::move(onWaitChunk), std::move(onSettled));
 }
 
