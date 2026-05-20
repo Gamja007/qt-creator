@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <functional>
+#include <QString>
+
 namespace ProjectExplorer {
 class RunControl;
 }
@@ -14,4 +17,10 @@ void initAndroidLogcat();
 void bindRunningAppToLogcat(
     ProjectExplorer::RunControl *runControl, qint64 pid, const QString &packageName);
 void unbindRunningAppFromLogcat(ProjectExplorer::RunControl *runControl);
+
+using JdbCallback = std::function<void()>;
+
+void setJdbCallbacksForLogcat(
+    ProjectExplorer::RunControl *runControl, JdbCallback onWaitChunk, JdbCallback onSettled);
+void clearJdbCallbacksForLogcat(ProjectExplorer::RunControl *runControl);
 } // namespace Android::Internal
