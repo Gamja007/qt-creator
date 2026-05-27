@@ -83,9 +83,10 @@ jobs:
     # Resolve the actual vcvars64.bat path on the runner.
     #
     # The matrix hardcodes the Visual Studio 2022 Enterprise path, but
-    # the GitHub windows-latest runner image sometimes ships Community
-    # or Professional instead, with a different install path. Upstream's
-    # CI happens to land on Enterprise, but my (your) builds may not.
+    # the GitHub windows-latest runner image sometimes ships a different
+    # VS edition or version (Community, Professional, VS 18, etc.) at
+    # a different install path. Upstream qt-creator's CI happens to land
+    # on Enterprise; ours may not.
     #
     # We probe the hardcoded path first; if it doesn't exist, fall back
     # to vswhere.exe (shipped on every windows-latest image) to find
@@ -661,22 +662,33 @@ jobs:
         set(ENV{MACOSX_DEPLOYMENT_TARGET} "${{ env.MACOS_DEPLOYMENT_TARGET }}")
 
         # ------------------------------------------------------------
-        # On Windows, source vcvars64.bat using the path resolved by
-        # the "Resolve vcvars64.bat path" step (which falls back to
-        # vswhere.exe if the matrix's hardcoded Enterprise path is
-        # not on the current runner image).
+        # On Windows, source vcvars64.bat through cmd /c so the shell
+        # actually executes the .bat and then `set` to dump the env.
+        # Without cmd /c, execute_process treats `&&` and `set` as raw
+        # argv tokens to the bat file, which silently produces nothing.
         # ------------------------------------------------------------
         if ("${{ runner.os }}" STREQUAL "Windows" AND NOT "x${{ steps.vcvars.outputs.vcvars_path }}" STREQUAL "x")
           set(vcvars_bat "${{ steps.vcvars.outputs.vcvars_path }}")
           message("Sourcing vcvars: ${vcvars_bat}")
+          # Convert forward-slashes back to backslashes; cmd.exe prefers them.
+          string(REPLACE "/" "\\" vcvars_bat_win "${vcvars_bat}")
           execute_process(
-            COMMAND "${vcvars_bat}" && set
+            COMMAND cmd /c "\"${vcvars_bat_win}\" && set"
             OUTPUT_FILE environment_script_output.txt
             RESULT_VARIABLE vcvars_result
           )
           if (NOT vcvars_result EQUAL 0)
             message(FATAL_ERROR "vcvars script exited non-zero: ${vcvars_result}")
           endif()
+
+          # Loud diagnostic: print the first chunk of vcvars output so we
+          # can see whether cmd actually ran the .bat or just printed an
+          # error. On next-run failures, this block tells us what to fix.
+          file(READ environment_script_output.txt env_head LIMIT 600)
+          message("--- vcvars output (first 600 chars) ---")
+          message("${env_head}")
+          message("--- end vcvars output ---")
+
           file(STRINGS environment_script_output.txt output_lines)
           foreach(line IN LISTS output_lines)
             if (line MATCHES "^([a-zA-Z0-9_()+\\[\\] -]+)=(.*)$")
@@ -684,16 +696,16 @@ jobs:
             endif()
           endforeach()
 
-          # Sanity check: cl.exe must be on PATH now. If it isn't, fail
+          # Sanity check: cl.exe must be on PATH now. If not, fail
           # *here* with a clear message rather than 5 minutes into CMake.
           find_program(cl_after_vcvars cl)
           if (NOT cl_after_vcvars)
+            file(READ environment_script_output.txt env_dump LIMIT 4000)
             message(FATAL_ERROR
               "cl.exe is not on PATH after sourcing vcvars.\n"
               "vcvars used: ${vcvars_bat}\n"
-              "First lines of environment_script_output.txt follow.")
-            file(READ environment_script_output.txt env_dump LIMIT 2000)
-            message("${env_dump}")
+              "PATH now: $ENV{PATH}\n"
+              "Full env dump (truncated to 4000 chars):\n${env_dump}")
           endif()
           message("MSVC active: ${cl_after_vcvars}")
         endif()
