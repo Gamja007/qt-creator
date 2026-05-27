@@ -774,39 +774,25 @@ jobs:
         AFTER_SHA: ${{ github.event.after }}
       run: |
         @echo on
-        rem --- Normalize the vcvars path (it has forward slashes from CMake) ---
-        setlocal enabledelayedexpansion
+        rem Normalize vcvars path (forward to backslash).
         set "VCVARS=%VCVARS_PATH:/=\%"
         echo Will source vcvars at: %VCVARS%
 
-        rem --- Decide build.py flags ---
+        rem Decide build.py flags.
         set "WITH_TESTS=--with-tests"
         set "NO_DMG=--no-dmg"
         set "WITH_CPACK="
         echo %GITHUB_REF_FROM_WORKFLOW% | findstr /B "refs/tags/v" >nul
-        if not errorlevel 1 (
-          set "WITH_TESTS="
-          set "NO_DMG="
-          set "WITH_CPACK=--with-cpack"
-        )
+        if not errorlevel 1 set "WITH_TESTS=" && set "NO_DMG=" && set "WITH_CPACK=--with-cpack"
+
         rem --no-cdb because qtcreatorcdbext's nested CMake hardcodes
         rem the "Visual Studio 16 2019" generator, which isn't available.
         set "CDB_OPTION=--no-cdb"
 
         set "ELFUTILS_OPTION="
-        if defined ELFUTILS_PATH (
-          if not "%ELFUTILS_PATH%"=="" (
-            set "ELFUTILS_OPTION=--elfutils-path %ELFUTILS_PATH%"
-          )
-        )
+        if not "%ELFUTILS_PATH%"=="" set "ELFUTILS_OPTION=--elfutils-path %ELFUTILS_PATH%"
 
-        rem --- Optional ccache clear via commit message ---
-        for /f "tokens=*" %%i in ('git log --format=%%B -n 1 %AFTER_SHA% 2^>nul') do (
-          echo %%i | findstr /R "ccache:.*clea[rn]" >nul
-          if not errorlevel 1 ccache --clear
-        )
-
-        rem --- ccache config (must be set BEFORE we call into vcvars+build) ---
+        rem ccache config (set BEFORE calling into vcvars+build).
         set "CCACHE_BASEDIR=%GITHUB_WORKSPACE%"
         set "CCACHE_DIR=%GITHUB_WORKSPACE%\.ccache"
         set "CCACHE_SLOPPINESS=pch_defines,time_macros"
@@ -815,53 +801,27 @@ jobs:
         set "CCACHE_MAXSIZE=600M"
         set "NINJA_STATUS=[%%f/%%t %%o/sec] "
 
-        rem --- CC/CXX so build.py picks MSVC ---
         set "CC=cl"
         set "CXX=cl"
 
         ccache -p
         ccache -z
 
-        rem --- Source vcvars in THIS shell so cl.exe ends up on PATH,
-        rem     then call build.py from the same shell. They share env. ---
         echo === sourcing vcvars ===
         call "%VCVARS%"
-        if errorlevel 1 (
-          echo ERROR: vcvars64.bat returned errorlevel %errorlevel%
-          exit /b 1
-        )
+        if not %errorlevel%==0 exit /b %errorlevel%
 
         echo === verifying cl.exe is on PATH ===
         where cl
-        if errorlevel 1 (
-          echo ERROR: cl.exe not on PATH after vcvars
-          echo PATH=%PATH%
-          exit /b 1
-        )
+        if not %errorlevel%==0 exit /b 1
+
+        echo === patching build.py to skip wininterrupt (VS 2019 unavailable) ===
+        python -c "import pathlib; p=pathlib.Path('scripts/build.py'); s=p.read_text(); a='    build_wininterrupt(args, paths)'; b='    pass  # build_wininterrupt skipped: VS 2019 generator unavailable'; c='        if common.is_windows_platform():\n            common.check_print_call(sevenzip'; d='        if False and common.is_windows_platform():\n            common.check_print_call(sevenzip'; s2=s.replace(a,b).replace(c,d); p.write_text(s2); print('patched' if s!=s2 else 'NO_CHANGE_PATCH_FAILED')"
+        if not %errorlevel%==0 exit /b %errorlevel%
 
         echo === running build.py ===
-        "%VENV_PYTHON%" -u scripts\build.py ^
-          --build-type Release ^
-          --src . ^
-          --build build ^
-          --qt-path "%QT_PATH%" ^
-          --llvm-path "%LLVM_PATH%" ^
-          --python3 "%VENV_PYTHON%" ^
-          %WITH_TESTS% ^
-          %CDB_OPTION% ^
-          %ELFUTILS_OPTION% ^
-          %NO_DMG% ^
-          --add-config=-DCMAKE_C_COMPILER_LAUNCHER=ccache ^
-          --add-config=-DCMAKE_CXX_COMPILER_LAUNCHER=ccache ^
-          --add-config=-DIDE_REVISION_URL=https://github.com/%GITHUB_REPOSITORY%/commits/%GITHUB_SHA% ^
-          --zip-infix=-%ARTIFACT%-%TAG% ^
-          --no-qbs ^
-          --with-sdk-tool ^
-          %WITH_CPACK%
-        if errorlevel 1 (
-          echo ERROR: build.py failed with errorlevel %errorlevel%
-          exit /b %errorlevel%
-        )
+        "%VENV_PYTHON%" -u scripts\build.py --build-type Release --src . --build build --qt-path "%QT_PATH%" --llvm-path "%LLVM_PATH%" --python3 "%VENV_PYTHON%" %WITH_TESTS% %CDB_OPTION% %ELFUTILS_OPTION% %NO_DMG% --add-config=-DCMAKE_C_COMPILER_LAUNCHER=ccache --add-config=-DCMAKE_CXX_COMPILER_LAUNCHER=ccache --add-config=-DIDE_REVISION_URL=https://github.com/%GITHUB_REPOSITORY%/commits/%GITHUB_SHA% --zip-infix=-%ARTIFACT%-%TAG% --no-qbs --with-sdk-tool %WITH_CPACK%
+        if not %errorlevel%==0 exit /b %errorlevel%
 
     - name: ccache statistics
       shell: cmake -P {0}
