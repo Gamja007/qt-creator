@@ -79,6 +79,61 @@ jobs:
         brew update
         brew install upx
 
+    # ====================================================================
+    # Resolve the actual vcvars64.bat path on the runner.
+    #
+    # The matrix hardcodes the Visual Studio 2022 Enterprise path, but
+    # the GitHub windows-latest runner image sometimes ships Community
+    # or Professional instead, with a different install path. Upstream's
+    # CI happens to land on Enterprise, but my (your) builds may not.
+    #
+    # We probe the hardcoded path first; if it doesn't exist, fall back
+    # to vswhere.exe (shipped on every windows-latest image) to find
+    # whatever Visual Studio install IS on the runner. The resolved
+    # path is exported as the step output `vcvars_path`, which the
+    # Build step uses below.
+    #
+    # If neither approach finds vcvars64.bat, this step fails *here*
+    # (not 5 minutes into the build inside CMake) with a clear message.
+    # ====================================================================
+    - name: Resolve vcvars64.bat path (Windows)
+      if: runner.os == 'Windows'
+      id: vcvars
+      shell: cmd
+      run: |
+        set "HARDCODED=${{ matrix.config.environment_script }}"
+        if exist "%HARDCODED%" (
+          echo Found hardcoded vcvars at: %HARDCODED%
+          echo vcvars_path=%HARDCODED%>> "%GITHUB_OUTPUT%"
+          goto :done
+        )
+        echo Hardcoded path not found: %HARDCODED%
+        echo Falling back to vswhere.exe to locate any VS install...
+        set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+        if not exist "%VSWHERE%" (
+          echo ERROR: vswhere.exe not found at "%VSWHERE%"
+          exit /b 1
+        )
+        for /f "usebackq tokens=*" %%i in (`"%VSWHERE%" -latest -prerelease -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do (
+          set "VSPATH=%%i"
+        )
+        if not defined VSPATH (
+          echo ERROR: vswhere found no VS install with VC x86.x64 tools
+          exit /b 1
+        )
+        set "FOUND=%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
+        if not exist "%FOUND%" (
+          echo ERROR: vswhere returned VS at "%VSPATH%" but vcvars64.bat is not at "%FOUND%"
+          exit /b 1
+        )
+        echo Found vcvars via vswhere at: %FOUND%
+        rem Convert backslashes to forward slashes for CMake-friendly use later
+        set "FOUND=%FOUND:\=/%"
+        echo vcvars_path=%FOUND%>> "%GITHUB_OUTPUT%"
+        :done
+        echo --- vcvars_path output ---
+        type "%GITHUB_OUTPUT%"
+
     - name: Download Ninja and CMake
       shell: cmake -P {0}
       run: |
@@ -605,17 +660,42 @@ jobs:
         set(ENV{CXX} ${{ matrix.config.cxx }})
         set(ENV{MACOSX_DEPLOYMENT_TARGET} "${{ env.MACOS_DEPLOYMENT_TARGET }}")
 
-        if ("${{ runner.os }}" STREQUAL "Windows" AND NOT "x${{ matrix.config.environment_script }}" STREQUAL "x")
+        # ------------------------------------------------------------
+        # On Windows, source vcvars64.bat using the path resolved by
+        # the "Resolve vcvars64.bat path" step (which falls back to
+        # vswhere.exe if the matrix's hardcoded Enterprise path is
+        # not on the current runner image).
+        # ------------------------------------------------------------
+        if ("${{ runner.os }}" STREQUAL "Windows" AND NOT "x${{ steps.vcvars.outputs.vcvars_path }}" STREQUAL "x")
+          set(vcvars_bat "${{ steps.vcvars.outputs.vcvars_path }}")
+          message("Sourcing vcvars: ${vcvars_bat}")
           execute_process(
-            COMMAND "${{ matrix.config.environment_script }}" && set
+            COMMAND "${vcvars_bat}" && set
             OUTPUT_FILE environment_script_output.txt
+            RESULT_VARIABLE vcvars_result
           )
+          if (NOT vcvars_result EQUAL 0)
+            message(FATAL_ERROR "vcvars script exited non-zero: ${vcvars_result}")
+          endif()
           file(STRINGS environment_script_output.txt output_lines)
           foreach(line IN LISTS output_lines)
-            if (line MATCHES "^([a-zA-Z0-9_-]+)=(.*)$")
+            if (line MATCHES "^([a-zA-Z0-9_()+\\[\\] -]+)=(.*)$")
               set(ENV{${CMAKE_MATCH_1}} "${CMAKE_MATCH_2}")
             endif()
           endforeach()
+
+          # Sanity check: cl.exe must be on PATH now. If it isn't, fail
+          # *here* with a clear message rather than 5 minutes into CMake.
+          find_program(cl_after_vcvars cl)
+          if (NOT cl_after_vcvars)
+            message(FATAL_ERROR
+              "cl.exe is not on PATH after sourcing vcvars.\n"
+              "vcvars used: ${vcvars_bat}\n"
+              "First lines of environment_script_output.txt follow.")
+            file(READ environment_script_output.txt env_dump LIMIT 2000)
+            message("${env_dump}")
+          endif()
+          message("MSVC active: ${cl_after_vcvars}")
         endif()
 
         set(ENV{NINJA_STATUS} "[%f/%t %o/sec] ")
