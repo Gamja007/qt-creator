@@ -667,23 +667,31 @@ jobs:
         # Without cmd /c, execute_process treats `&&` and `set` as raw
         # argv tokens to the bat file, which silently produces nothing.
         # ------------------------------------------------------------
+        
         if ("${{ runner.os }}" STREQUAL "Windows" AND NOT "x${{ steps.vcvars.outputs.vcvars_path }}" STREQUAL "x")
           set(vcvars_bat "${{ steps.vcvars.outputs.vcvars_path }}")
           message("Sourcing vcvars: ${vcvars_bat}")
-          # Convert forward-slashes back to backslashes; cmd.exe prefers them.
           string(REPLACE "/" "\\" vcvars_bat_win "${vcvars_bat}")
+
+          # Write a one-line wrapper .bat that calls the real vcvars and
+          # then runs `set`. This sidesteps every quoting headache between
+          # CMake's argv packing and cmd.exe's command-line parser: the
+          # wrapper bat has the path as plain text, no quoting at all
+          # except around the file path itself (which cmd handles natively).
+          file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/run_vcvars.bat"
+            "@echo off\r\ncall \"${vcvars_bat_win}\"\r\nset\r\n")
+
           execute_process(
-            COMMAND cmd /c "\"${vcvars_bat_win}\" && set"
+            COMMAND cmd /c run_vcvars.bat
+            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
             OUTPUT_FILE environment_script_output.txt
             RESULT_VARIABLE vcvars_result
           )
           if (NOT vcvars_result EQUAL 0)
-            message(FATAL_ERROR "vcvars script exited non-zero: ${vcvars_result}")
+            file(READ environment_script_output.txt env_head LIMIT 2000)
+            message(FATAL_ERROR "vcvars wrapper exited ${vcvars_result}. Output:\n${env_head}")
           endif()
 
-          # Loud diagnostic: print the first chunk of vcvars output so we
-          # can see whether cmd actually ran the .bat or just printed an
-          # error. On next-run failures, this block tells us what to fix.
           file(READ environment_script_output.txt env_head LIMIT 600)
           message("--- vcvars output (first 600 chars) ---")
           message("${env_head}")
@@ -696,8 +704,6 @@ jobs:
             endif()
           endforeach()
 
-          # Sanity check: cl.exe must be on PATH now. If not, fail
-          # *here* with a clear message rather than 5 minutes into CMake.
           find_program(cl_after_vcvars cl)
           if (NOT cl_after_vcvars)
             file(READ environment_script_output.txt env_dump LIMIT 4000)
