@@ -82,20 +82,10 @@ jobs:
     # ====================================================================
     # Resolve the actual vcvars64.bat path on the runner.
     #
-    # The matrix hardcodes the Visual Studio 2022 Enterprise path, but
-    # the GitHub windows-latest runner image sometimes ships a different
-    # VS edition or version (Community, Professional, VS 18, etc.) at
-    # a different install path. Upstream qt-creator's CI happens to land
-    # on Enterprise; ours may not.
-    #
-    # We probe the hardcoded path first; if it doesn't exist, fall back
-    # to vswhere.exe (shipped on every windows-latest image) to find
-    # whatever Visual Studio install IS on the runner. The resolved
-    # path is exported as the step output `vcvars_path`, which the
-    # Build step uses below.
-    #
-    # If neither approach finds vcvars64.bat, this step fails *here*
-    # (not 5 minutes into the build inside CMake) with a clear message.
+    # Matrix hardcodes the VS 2022 Enterprise path. windows-latest may
+    # ship a different VS edition/version (Community, Professional,
+    # VS 2026/v18, etc.) at a different install path. Probe the hardcoded
+    # path first; on miss, fall back to vswhere.exe to find any VS install.
     # ====================================================================
     - name: Resolve vcvars64.bat path (Windows)
       if: runner.os == 'Windows'
@@ -654,67 +644,18 @@ jobs:
           endif()
         endforeach()
 
-    - name: Build
+    # ====================================================================
+    # Build (non-Windows). Linux and macOS use the original upstream
+    # cmake-driven invocation. Windows runs in its own native cmd-shell
+    # step below so vcvars and build.py share one process tree.
+    # ====================================================================
+    - name: Build (non-Windows)
+      if: runner.os != 'Windows'
       shell: cmake -P {0}
       run: |
         set(ENV{CC} ${{ matrix.config.cc }})
         set(ENV{CXX} ${{ matrix.config.cxx }})
         set(ENV{MACOSX_DEPLOYMENT_TARGET} "${{ env.MACOS_DEPLOYMENT_TARGET }}")
-
-        # ------------------------------------------------------------
-        # On Windows, source vcvars64.bat through cmd /c so the shell
-        # actually executes the .bat and then `set` to dump the env.
-        # Without cmd /c, execute_process treats `&&` and `set` as raw
-        # argv tokens to the bat file, which silently produces nothing.
-        # ------------------------------------------------------------
-        
-        if ("${{ runner.os }}" STREQUAL "Windows" AND NOT "x${{ steps.vcvars.outputs.vcvars_path }}" STREQUAL "x")
-          set(vcvars_bat "${{ steps.vcvars.outputs.vcvars_path }}")
-          message("Sourcing vcvars: ${vcvars_bat}")
-          string(REPLACE "/" "\\" vcvars_bat_win "${vcvars_bat}")
-
-          # Write a one-line wrapper .bat that calls the real vcvars and
-          # then runs `set`. This sidesteps every quoting headache between
-          # CMake's argv packing and cmd.exe's command-line parser: the
-          # wrapper bat has the path as plain text, no quoting at all
-          # except around the file path itself (which cmd handles natively).
-          file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/run_vcvars.bat"
-            "@echo off\r\ncall \"${vcvars_bat_win}\"\r\nset\r\n")
-
-          execute_process(
-            COMMAND cmd /c run_vcvars.bat
-            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-            OUTPUT_FILE environment_script_output.txt
-            RESULT_VARIABLE vcvars_result
-          )
-          if (NOT vcvars_result EQUAL 0)
-            file(READ environment_script_output.txt env_head LIMIT 2000)
-            message(FATAL_ERROR "vcvars wrapper exited ${vcvars_result}. Output:\n${env_head}")
-          endif()
-
-          file(READ environment_script_output.txt env_head LIMIT 600)
-          message("--- vcvars output (first 600 chars) ---")
-          message("${env_head}")
-          message("--- end vcvars output ---")
-
-          file(STRINGS environment_script_output.txt output_lines)
-          foreach(line IN LISTS output_lines)
-            if (line MATCHES "^([a-zA-Z0-9_()+\\[\\] -]+)=(.*)$")
-              set(ENV{${CMAKE_MATCH_1}} "${CMAKE_MATCH_2}")
-            endif()
-          endforeach()
-
-          find_program(cl_after_vcvars cl)
-          if (NOT cl_after_vcvars)
-            file(READ environment_script_output.txt env_dump LIMIT 4000)
-            message(FATAL_ERROR
-              "cl.exe is not on PATH after sourcing vcvars.\n"
-              "vcvars used: ${vcvars_bat}\n"
-              "PATH now: $ENV{PATH}\n"
-              "Full env dump (truncated to 4000 chars):\n${env_dump}")
-          endif()
-          message("MSVC active: ${cl_after_vcvars}")
-        endif()
 
         set(ENV{NINJA_STATUS} "[%f/%t %o/sec] ")
 
@@ -725,9 +666,6 @@ jobs:
         set(ENV{CCACHE_COMPRESS} "true")
         set(ENV{CCACHE_COMPRESSLEVEL} "9")
         set(ENV{CCACHE_MAXSIZE} "400M")
-        if ("${{ matrix.config.cxx }}" STREQUAL "cl")
-          set(ENV{CCACHE_MAXSIZE} "600M")
-        endif()
 
         execute_process(
           COMMAND git log --format=%B -n 1 ${{ github.event.after }}
@@ -740,11 +678,7 @@ jobs:
         execute_process(COMMAND ccache -p)
         execute_process(COMMAND ccache -z)
 
-        if ("x${{ matrix.config.environment_script }}" STREQUAL "x")
-          set(CDB_OPTION "--no-cdb")
-        else()
-          set(CDB_OPTION)
-        endif()
+        set(CDB_OPTION "--no-cdb")
 
         if (NOT "${{ steps.elfutils.outputs.elfutils_dir }}" STREQUAL "")
           set(ELFUTILS_OPTION "--elfutils-path;${{ steps.elfutils.outputs.elfutils_dir }}")
@@ -762,14 +696,6 @@ jobs:
           set(WITH_CPACK "--with-cpack")
         endif()
 
-        if (NOT "x${{ matrix.config.toolchain_path }}" STREQUAL "x")
-          set(path_separator ":")
-          if ("${{ runner.os }}" STREQUAL "Windows")
-            set(path_separator ";")
-          endif()
-          set(ENV{PATH} "$ENV{GITHUB_WORKSPACE}/${{ matrix.config.toolchain_path }}${path_separator}$ENV{PATH}")
-        endif()
-
         if ("${{ runner.os }}" STREQUAL "macOS")
             if (${{github.ref}} MATCHES "tags/v(.*)")
                 set(ENV{CMAKE_OSX_ARCHITECTURES} "x86_64;arm64")
@@ -780,11 +706,6 @@ jobs:
 
         find_program(llvm_link_exe llvm-link PATHS "${{ steps.libclang.outputs.libclang_dir }}/bin")
         set(WITH_LLVM_LINK --add-config=-DCMAKE_LINKER=${llvm_link_exe})
-
-        # Not for MSVC
-        if ("${{ runner.os }}" STREQUAL "Windows" AND NOT "x${{ matrix.config.environment_script }}" STREQUAL "x")
-            unset(WITH_LLVM_LINK)
-        endif()
 
         execute_process(
           COMMAND "${venv_python}"
@@ -820,6 +741,127 @@ jobs:
           message("::error::${error_message}")
           message(FATAL_ERROR "Build failed")
         endif()
+
+    # ====================================================================
+    # Build (Windows).
+    #
+    # Why this is different from Linux/macOS: on Windows the build needs
+    # the MSVC environment (cl.exe, link.exe, INCLUDE, LIB, etc) on PATH,
+    # which is provided by vcvars64.bat. Attempts to source vcvars in
+    # cmake script mode and replay its env into the cmake process have
+    # failed because file(STRINGS) + regex don't survive the size and
+    # special chars in the resulting PATH dump.
+    #
+    # The reliable approach: invoke a single cmd.exe session that first
+    # calls vcvars64.bat, then runs scripts/build.py. They share the same
+    # process tree so cl.exe is found naturally.
+    #
+    # We compute all the build.py args here, write a wrapper .bat to
+    # disk that calls vcvars and then build.py, and execute that.
+    # ====================================================================
+    - name: Build (Windows)
+      if: runner.os == 'Windows'
+      shell: cmd
+      env:
+        VCVARS_PATH: ${{ steps.vcvars.outputs.vcvars_path }}
+        QT_PATH: ${{ steps.qt.outputs.qt_dir }}
+        LLVM_PATH: ${{ steps.libclang.outputs.libclang_dir }}
+        ELFUTILS_PATH: ${{ steps.elfutils.outputs.elfutils_dir }}
+        VENV_PYTHON: ${{ steps.python.outputs.python }}
+        TAG: ${{ steps.git.outputs.tag }}
+        ARTIFACT: ${{ matrix.config.artifact }}
+        GITHUB_REF_FROM_WORKFLOW: ${{ github.ref }}
+        AFTER_SHA: ${{ github.event.after }}
+      run: |
+        @echo on
+        rem --- Normalize the vcvars path (it has forward slashes from CMake) ---
+        setlocal enabledelayedexpansion
+        set "VCVARS=%VCVARS_PATH:/=\%"
+        echo Will source vcvars at: %VCVARS%
+
+        rem --- Decide build.py flags ---
+        set "WITH_TESTS=--with-tests"
+        set "NO_DMG=--no-dmg"
+        set "WITH_CPACK="
+        echo %GITHUB_REF_FROM_WORKFLOW% | findstr /B "refs/tags/v" >nul
+        if not errorlevel 1 (
+          set "WITH_TESTS="
+          set "NO_DMG="
+          set "WITH_CPACK=--with-cpack"
+        )
+        rem --no-cdb because qtcreatorcdbext's nested CMake hardcodes
+        rem the "Visual Studio 16 2019" generator, which isn't available.
+        set "CDB_OPTION=--no-cdb"
+
+        set "ELFUTILS_OPTION="
+        if defined ELFUTILS_PATH (
+          if not "%ELFUTILS_PATH%"=="" (
+            set "ELFUTILS_OPTION=--elfutils-path %ELFUTILS_PATH%"
+          )
+        )
+
+        rem --- Optional ccache clear via commit message ---
+        for /f "tokens=*" %%i in ('git log --format=%%B -n 1 %AFTER_SHA% 2^>nul') do (
+          echo %%i | findstr /R "ccache:.*clea[rn]" >nul
+          if not errorlevel 1 ccache --clear
+        )
+
+        rem --- ccache config (must be set BEFORE we call into vcvars+build) ---
+        set "CCACHE_BASEDIR=%GITHUB_WORKSPACE%"
+        set "CCACHE_DIR=%GITHUB_WORKSPACE%\.ccache"
+        set "CCACHE_SLOPPINESS=pch_defines,time_macros"
+        set "CCACHE_COMPRESS=true"
+        set "CCACHE_COMPRESSLEVEL=9"
+        set "CCACHE_MAXSIZE=600M"
+        set "NINJA_STATUS=[%%f/%%t %%o/sec] "
+
+        rem --- CC/CXX so build.py picks MSVC ---
+        set "CC=cl"
+        set "CXX=cl"
+
+        ccache -p
+        ccache -z
+
+        rem --- Source vcvars in THIS shell so cl.exe ends up on PATH,
+        rem     then call build.py from the same shell. They share env. ---
+        echo === sourcing vcvars ===
+        call "%VCVARS%"
+        if errorlevel 1 (
+          echo ERROR: vcvars64.bat returned errorlevel %errorlevel%
+          exit /b 1
+        )
+
+        echo === verifying cl.exe is on PATH ===
+        where cl
+        if errorlevel 1 (
+          echo ERROR: cl.exe not on PATH after vcvars
+          echo PATH=%PATH%
+          exit /b 1
+        )
+
+        echo === running build.py ===
+        "%VENV_PYTHON%" -u scripts\build.py ^
+          --build-type Release ^
+          --src . ^
+          --build build ^
+          --qt-path "%QT_PATH%" ^
+          --llvm-path "%LLVM_PATH%" ^
+          --python3 "%VENV_PYTHON%" ^
+          %WITH_TESTS% ^
+          %CDB_OPTION% ^
+          %ELFUTILS_OPTION% ^
+          %NO_DMG% ^
+          --add-config=-DCMAKE_C_COMPILER_LAUNCHER=ccache ^
+          --add-config=-DCMAKE_CXX_COMPILER_LAUNCHER=ccache ^
+          --add-config=-DIDE_REVISION_URL=https://github.com/%GITHUB_REPOSITORY%/commits/%GITHUB_SHA% ^
+          --zip-infix=-%ARTIFACT%-%TAG% ^
+          --no-qbs ^
+          --with-sdk-tool ^
+          %WITH_CPACK%
+        if errorlevel 1 (
+          echo ERROR: build.py failed with errorlevel %errorlevel%
+          exit /b %errorlevel%
+        )
 
     - name: ccache statistics
       shell: cmake -P {0}
