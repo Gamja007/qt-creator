@@ -543,7 +543,7 @@ quint8 TextBlockUserData::attributeState(const QTextBlock &block)
 }
 
 void TextBlockUserData::updateSuggestionFormats(const QTextBlock &block,
-                                                 const FontSettings &fontSettings)
+                                                 const FontSettingsData &fontSettings)
 {
     if (TextSuggestion *suggestion = TextBlockUserData::suggestion(block)) {
         QTextDocument *suggestionDoc = suggestion->replacementDocument();
@@ -882,14 +882,14 @@ QRectF TextDocumentLayout::replacementBlockBoundingRect(const QTextBlock &block)
 
 int TextDocumentLayout::lineSpacing() const
 {
-    if (TextEditorSettings::fontSettings().relativeLineSpacing() != 100)
-        return TextEditorSettings::fontSettings().lineSpacing();
+    if (globalFontSettings().lineSpacing() != 100)
+        return globalFontSettings().data().lineSpacing();
     return PlainTextDocumentLayout::lineSpacing();
 }
 
 int TextDocumentLayout::relativeLineSpacing() const
 {
-    return TextEditorSettings::fontSettings().relativeLineSpacing();
+    return globalFontSettings().lineSpacing();
 }
 
 void TextDocumentLayout::FoldValidator::setup(TextDocumentLayout *layout)

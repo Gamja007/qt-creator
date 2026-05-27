@@ -73,14 +73,14 @@ namespace BinEditor::Internal {
 const int SearchStride = 1024 * 1024;
 const char C_ENCODING_SETTING[] = "BinEditor/TextEncoding";
 
-class BinEditorDocument : public IDocument
+class BinEditorDocument final : public IDocument
 {
     Q_OBJECT
 
 public:
     BinEditorDocument();
 
-    ~BinEditorDocument()
+    ~BinEditorDocument() final
     {
         if (m_aboutToBeDestroyedHandler)
             m_aboutToBeDestroyedHandler();
@@ -240,7 +240,7 @@ public:
 
     QList<Markup> markup() const { return m_markup; }
 
-    void setFontSettings(const FontSettings &fs);
+    void setFontSettings(const FontSettingsData &fs);
     void highlightSearchResults(const QByteArray &pattern, QTextDocument::FindFlags findFlags = {});
     void copy(bool raw = false);
     void setMarkup(const QList<Markup> &markup);
@@ -384,7 +384,7 @@ BinEditorWidget::BinEditorWidget(const std::shared_ptr<BinEditorDocument> &doc)
     });
 
     // Font settings
-    setFontSettings(TextEditorSettings::fontSettings());
+    setFontSettings(globalFontSettings().data());
     connect(TextEditorSettings::instance(), &TextEditorSettings::fontSettingsChanged,
             this, &BinEditorWidget::setFontSettings);
 
@@ -541,7 +541,7 @@ QByteArray BinEditorDocument::blockData(qint64 block, bool old) const
             ? it.value() : m_data.value(block, m_emptyBlock);
 }
 
-void BinEditorWidget::setFontSettings(const FontSettings &fs)
+void BinEditorWidget::setFontSettings(const FontSettingsData &fs)
 {
     setFont(fs.toTextCharFormat(TextEditor::C_TEXT).font());
 }
@@ -1725,11 +1725,7 @@ void BinEditorDocument::changeData(qint64 position, uchar character, bool highNi
     m_redoStack.clear();
     if (m_unmodifiedState > m_undoStack.size())
         m_unmodifiedState = -1;
-    BinEditorEditCommand cmd;
-    cmd.position = position;
-    cmd.character = (uchar) dataAt(position);
-    cmd.highNibble = highNibble;
-
+    BinEditorEditCommand cmd{int(position), (uchar) dataAt(position), highNibble};
     if (!highNibble
             && !m_undoStack.isEmpty()
             && m_undoStack.top().position == position
@@ -2278,60 +2274,60 @@ public:
     }
 
     // Service interface
-    IEditor *editor() { return this; }
+    IEditor *editor() final { return this; }
 
     // "Slots"
-    void setSizes(quint64 address, qint64 range, int blockSize)
+    void setSizes(quint64 address, qint64 range, int blockSize) final
     {
         m_document->setSizes(address, range, blockSize);
     }
 
-    void setReadOnly(bool on)
+    void setReadOnly(bool on) final
     {
         if (m_widget)
             m_widget->setReadOnly(on);
     }
 
-    void setFinished()
+    void setFinished() final
     {
         if (m_widget)
             m_widget->setReadOnly(true);
         m_document->setFinished();
     }
 
-    void setNewWindowRequestAllowed(bool on)
+    void setNewWindowRequestAllowed(bool on) final
     {
         if (m_widget)
             m_widget->setNewWindowRequestAllowed(on);
     }
 
-    void setCursorPosition(qint64 pos, MoveMode moveMode = MoveAnchor)
+    void setCursorPosition(qint64 pos, MoveMode moveMode = MoveAnchor) final
     {
         if (m_widget)
             m_widget->setCursorPosition(pos, moveMode);
     }
 
-    void updateContents()
+    void updateContents() final
     {
         m_document->updateContents();
     }
 
-    void addData(quint64 address, const QByteArray &data)
+    void addData(quint64 address, const QByteArray &data) final
     {
         m_document->addData(address, data);
     }
 
-    void clearMarkup()
+    void clearMarkup() final
     {
         if (m_widget)
             m_widget->clearMarkup();
     }
-    void addMarkup(quint64 address, quint64 len, const QColor &color, const QString &toolTip)
+    void addMarkup(quint64 address, quint64 len, const QColor &color, const QString &toolTip) final
     {
         if (m_widget)
             m_widget->addMarkup(address, len, color, toolTip);
     }
-    void commitMarkup()
+    void commitMarkup() final
     {
         if (m_widget)
             m_widget->commitMarkup();

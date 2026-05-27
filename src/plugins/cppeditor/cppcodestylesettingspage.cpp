@@ -414,7 +414,7 @@ CppCodeStylePreferencesWidget::CppCodeStylePreferencesWidget(QWidget *parent)
     : TextEditor::CodeStyleEditorWidget(parent)
     , d(new Internal::CppCodeStylePreferencesWidgetPrivate(this))
 {
-    decorateEditors(TextEditorSettings::fontSettings());
+    decorateEditors(globalFontSettings().data());
     connect(TextEditorSettings::instance(), &TextEditorSettings::fontSettingsChanged,
             this, &CppCodeStylePreferencesWidget::decorateEditors);
 
@@ -596,7 +596,7 @@ void CppCodeStylePreferencesWidget::updatePreview()
     }
 }
 
-void CppCodeStylePreferencesWidget::decorateEditors(const FontSettings &fontSettings)
+void CppCodeStylePreferencesWidget::decorateEditors(const FontSettingsData &fontSettings)
 {
     for (SnippetEditorWidget *editor : std::as_const(d->m_previews)) {
         editor->textDocument()->setFontSettings(fontSettings);

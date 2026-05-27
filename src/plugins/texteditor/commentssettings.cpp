@@ -128,15 +128,38 @@ void CommentsSettings::Data::toMap(Store &data) const
     data.insert(kCommandPrefix, int(commandPrefix));
 }
 
+// Hook for ProjectExplorer
+
+static  std::function<CommentsSettings::Data(const FilePath &)> g_retrieveCommentsSettings;
+
+void setCommentsSettingsRetriever(const std::function<CommentsSettings::Data(const FilePath &)> &retrieve)
+{
+    g_retrieveCommentsSettings = retrieve;
+}
+
+CommentsSettings::Data commentsSettings(const FilePath &filePath)
+{
+    QTC_ASSERT(g_retrieveCommentsSettings, return CommentsSettings::instance().data());
+    return g_retrieveCommentsSettings(filePath);
+}
 
 namespace Internal {
 
-CommentsSettingsPage::CommentsSettingsPage()
+class CommentsSettingsPage final : public Core::IOptionsPage
 {
-    setId(Constants::TEXT_EDITOR_COMMENTS_SETTINGS);
-    setDisplayName(Tr::tr("Documentation Comments"));
-    setCategory(TextEditor::Constants::TEXT_EDITOR_SETTINGS_CATEGORY);
-    setSettingsProvider([] { return &CommentsSettings::instance(); });
+public:
+    CommentsSettingsPage()
+    {
+        setId(Constants::TEXT_EDITOR_COMMENTS_SETTINGS);
+        setDisplayName(Tr::tr("Documentation Comments"));
+        setCategory(TextEditor::Constants::TEXT_EDITOR_SETTINGS_CATEGORY);
+        setSettingsProvider([] { return &CommentsSettings::instance(); });
+    }
+};
+
+void setupCommentsSettings()
+{
+    static CommentsSettingsPage theCommentsSettingsPage;
 }
 
 } // namespace Internal

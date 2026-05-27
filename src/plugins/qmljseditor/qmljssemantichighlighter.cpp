@@ -158,7 +158,7 @@ public:
     };
     CollectionTask(QPromise<SemanticHighlighter::Use> &promise,
                    const QmlJSTools::SemanticInfo &semanticInfo,
-                   const TextEditor::FontSettings &fontSettings,
+                   const TextEditor::FontSettingsData &fontSettings,
                    Flags flags)
         : m_promise(promise)
         , m_semanticInfo(semanticInfo)
@@ -573,7 +573,7 @@ private:
 
     QPromise<SemanticHighlighter::Use> &m_promise;
     const QmlJSTools::SemanticInfo &m_semanticInfo;
-    const TextEditor::FontSettings m_fontSettings;
+    const TextEditor::FontSettingsData m_fontSettings;
     ScopeChain m_scopeChain;
     ScopeBuilder m_scopeBuilder;
     QStringList m_stateNames;
@@ -605,7 +605,7 @@ void SemanticHighlighter::rerun(const QmlJSTools::SemanticInfo &semanticInfo)
 
     m_startRevision = m_document->document()->revision();
     auto future = Utils::asyncRun(QThread::LowestPriority, &SemanticHighlighter::run, this,
-                                  semanticInfo, TextEditor::TextEditorSettings::fontSettings());
+                                  semanticInfo, TextEditor::globalFontSettings().data());
     m_watcher.setFuture(future);
     m_futureSynchronizer.addFuture(future);
 }
@@ -644,7 +644,7 @@ void SemanticHighlighter::finished()
 
 void SemanticHighlighter::run(QPromise<Use> &promise,
                               const QmlJSTools::SemanticInfo &semanticInfo,
-                              const TextEditor::FontSettings &fontSettings)
+                              const TextEditor::FontSettingsData &fontSettings)
 {
     CollectionTask task(promise,
                         semanticInfo,
@@ -655,7 +655,7 @@ void SemanticHighlighter::run(QPromise<Use> &promise,
     task.run();
 }
 
-void SemanticHighlighter::updateFontSettings(const TextEditor::FontSettings &fontSettings)
+void SemanticHighlighter::updateFontSettings(const TextEditor::FontSettingsData &fontSettings)
 {
     m_formats[LocalIdType] = fontSettings.toTextCharFormat(TextEditor::C_QML_LOCAL_ID);
     m_formats[ExternalIdType] = fontSettings.toTextCharFormat(TextEditor::C_QML_EXTERNAL_ID);

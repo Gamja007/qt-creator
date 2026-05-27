@@ -1021,7 +1021,7 @@ QmlJSCodeStylePreferencesWidget::QmlJSCodeStylePreferencesWidget(
     QSizePolicy sp(QSizePolicy::MinimumExpanding, QSizePolicy::MinimumExpanding);
     sp.setHorizontalStretch(1);
     m_previewTextEdit->setSizePolicy(sp);
-    decorateEditor(TextEditorSettings::fontSettings());
+    decorateEditor(globalFontSettings().data());
 
     connect(
         TextEditorSettings::instance(),
@@ -1107,7 +1107,7 @@ void QmlJSCodeStylePreferencesWidget::setPreferences(QmlJSCodeStylePreferences *
     updatePreview();
 }
 
-void QmlJSCodeStylePreferencesWidget::decorateEditor(const FontSettings &fontSettings)
+void QmlJSCodeStylePreferencesWidget::decorateEditor(const FontSettingsData &fontSettings)
 {
     m_previewTextEdit->textDocument()->setFontSettings(fontSettings);
     SnippetProvider::decorateEditor(m_previewTextEdit,

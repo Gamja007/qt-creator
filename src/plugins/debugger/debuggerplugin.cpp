@@ -727,7 +727,7 @@ public:
 
 void DebuggerPluginPrivate::addFontSizeAdaptation(QWidget *widget)
 {
-    auto adaptFont = [](QWidget *widget, const FontSettings &fs) {
+    auto adaptFont = [](QWidget *widget, const FontSettingsData &fs) {
         if (!settings().fontSizeFollowsEditor())
             return;
         qreal size = fs.fontZoom() * fs.fontSize() / 100.;
@@ -739,9 +739,9 @@ void DebuggerPluginPrivate::addFontSizeAdaptation(QWidget *widget)
     QObject::connect(TextEditorSettings::instance(),
                      &TextEditorSettings::fontSettingsChanged,
                      this,
-                     [widget, adaptFont](const FontSettings &fs) { adaptFont(widget, fs); });
+                     [widget, adaptFont](const FontSettingsData &fs) { adaptFont(widget, fs); });
 
-    adaptFont(widget, TextEditorSettings::fontSettings());
+    adaptFont(widget, globalFontSettings().data());
 };
 
 BaseTreeView *DebuggerPluginPrivate::createBreakpointManagerView(const QByteArray &settingsKey)

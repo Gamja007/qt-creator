@@ -14,7 +14,6 @@
 #include "icodestylepreferences.h"
 #include "icodestylepreferencesfactory.h"
 #include "marginsettings.h"
-#include "simplecodestylepreferences.h"
 #include "texteditorconstants.h"
 #include "texteditortr.h"
 
@@ -37,26 +36,11 @@ namespace Internal {
 class TextEditorSettingsPrivate
 {
 public:
-    TextEditorSettingsPrivate()
-    {
-        m_globalCodeStyle.setDisplayName(Tr::tr("Global", "Settings"));
-        m_globalCodeStyle.setId(Constants::GLOBAL_SETTINGS_ID);
-        m_globalCodeStyle.fromSettings(Constants::CODE_STYLE_SETTINGS_PREFIX);
-        m_defaultCodeStylePool.addCodeStyle(&m_globalCodeStyle);
-    }
-
-    CommentsSettingsPage m_commentsSettingsPage;
-
     QMap<Utils::Id, ICodeStylePreferencesFactory *> m_languageToFactory;
 
     QMap<Utils::Id, ICodeStylePreferences *> m_languageToCodeStyle;
     QMap<Utils::Id, CodeStylePool *> m_languageToCodeStylePool;
     QMap<QString, Utils::Id> m_mimeTypeToLanguage;
-
-    std::function<CommentsSettings::Data(const Utils::FilePath &)> m_retrieveCommentsSettings;
-
-    SimpleCodeStylePreferences m_globalCodeStyle;
-    CodeStylePool m_defaultCodeStylePool{nullptr};
 };
 
 } // namespace Internal
@@ -71,6 +55,8 @@ TextEditorSettings::TextEditorSettings()
     Internal::setupFontSettingsPage();
     setupCompletionSettings();
     setupDisplaySettings();
+    setupCommentsSettings();
+    Internal::setupGlobalCodeStyle();
 
     // Note: default background colors are coming from FormatDescription::background()
 
@@ -99,23 +85,6 @@ TextEditorSettings *TextEditorSettings::instance()
     return &textEditorSettings();
 }
 
-FontSettings TextEditorSettings::fontSettings()
-{
-    return globalFontSettings().data();
-}
-
-void TextEditorSettings::setCommentsSettingsRetriever(
-    const std::function<CommentsSettings::Data(const Utils::FilePath &)> &retrieve)
-{
-    d->m_retrieveCommentsSettings = retrieve;
-}
-
-CommentsSettings::Data TextEditorSettings::commentsSettings(const Utils::FilePath &filePath)
-{
-    QTC_ASSERT(d->m_retrieveCommentsSettings, return CommentsSettings::instance().data());
-    return d->m_retrieveCommentsSettings(filePath);
-}
-
 void TextEditorSettings::registerCodeStyleFactory(ICodeStylePreferencesFactory *factory)
 {
     d->m_languageToFactory.insert(factory->languageId(), factory);
@@ -138,7 +107,7 @@ ICodeStylePreferencesFactory *TextEditorSettings::codeStyleFactory(Utils::Id lan
 
 ICodeStylePreferences *TextEditorSettings::codeStyle()
 {
-    return &d->m_globalCodeStyle;
+    return &globalCodeStyle();
 }
 
 ICodeStylePreferences *TextEditorSettings::codeStyle(Utils::Id languageId)
@@ -159,11 +128,6 @@ void TextEditorSettings::registerCodeStyle(Utils::Id languageId, ICodeStylePrefe
 void TextEditorSettings::unregisterCodeStyle(Utils::Id languageId)
 {
     d->m_languageToCodeStyle.remove(languageId);
-}
-
-CodeStylePool *TextEditorSettings::codeStylePool()
-{
-    return &d->m_defaultCodeStylePool;
 }
 
 CodeStylePool *TextEditorSettings::codeStylePool(Utils::Id languageId)
@@ -194,7 +158,7 @@ Utils::Id TextEditorSettings::languageId(const QString &mimeType)
 static int setFontZoom(int zoom)
 {
     zoom = qMax(10, zoom);
-    FontSettings fs = globalFontSettings().data();
+    FontSettingsData fs = globalFontSettings().data();
     if (fs.fontZoom() != zoom) {
         fs.setFontZoom(zoom);
         globalFontSettings().setData(fs);
@@ -206,20 +170,20 @@ static int setFontZoom(int zoom)
 
 int TextEditorSettings::increaseFontZoom()
 {
-    const int previousZoom = globalFontSettings().data().fontZoom();
+    const int previousZoom = globalFontSettings().fontZoom();
     return setFontZoom(previousZoom + 10 - previousZoom % 10);
 }
 
 int TextEditorSettings::decreaseFontZoom()
 {
-    const int previousZoom = globalFontSettings().data().fontZoom();
+    const int previousZoom = globalFontSettings().fontZoom();
     const int delta = previousZoom % 10;
     return setFontZoom(previousZoom - (delta == 0 ? 10 : delta));
 }
 
 int TextEditorSettings::increaseFontZoom(int step)
 {
-    return setFontZoom(globalFontSettings().data().fontZoom() + step);
+    return setFontZoom(globalFontSettings().fontZoom() + step);
 }
 
 void TextEditorSettings::resetFontZoom()

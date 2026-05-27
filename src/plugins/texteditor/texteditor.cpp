@@ -698,7 +698,7 @@ struct PaintEventData
     const int documentWidth;
     const QTextCursor textCursor;
     const bool isEditable;
-    const FontSettings fontSettings;
+    const FontSettingsData fontSettings;
     const int lineSpacing;
     const QTextCharFormat searchScopeFormat;
     const QTextCharFormat searchResultFormat;
@@ -1665,7 +1665,7 @@ void TextEditorWidgetPrivate::setDocument(const QSharedPointer<TextDocument> &do
     // Apply current settings
     // the document might already have the same settings as we set here in which case we do not
     // get an update, so we have to trigger updates manually here
-    const FontSettings fontSettings = TextEditorSettings::fontSettings();
+    const FontSettingsData fontSettings = globalFontSettings().data();
     if (m_document->fontSettings() == fontSettings)
         applyFontSettingsDelayed();
     else
@@ -1736,7 +1736,7 @@ static int foldBoxWidth(const QFontMetrics &fm)
 
 static int foldBoxWidth()
 {
-    const int lineSpacing = TextEditorSettings::fontSettings().lineSpacing();
+    const int lineSpacing = globalFontSettings().data().lineSpacing();
     return lineSpacing + lineSpacing % 2 + 1;
 }
 
@@ -4076,7 +4076,7 @@ void TextEditorWidgetPrivate::configureGenericHighlighter(
         return highlighter;
     });
 
-    m_document->setFontSettings(TextEditorSettings::fontSettings());
+    m_document->setFontSettings(globalFontSettings().data());
 }
 
 void TextEditorWidgetPrivate::setupFromDefinition(const KSyntaxHighlighting::Definition &definition)
@@ -4827,7 +4827,7 @@ void TextEditorWidgetPrivate::updateActions()
         a->setEnabled(isWritable);
     m_unCommentSelectionAction->setEnabled((m_optionalActionMask & OptionalActions::UnCommentSelection) && isWritable);
     m_visualizeWhitespaceAction->setEnabled(q);
-    if (TextEditorSettings::fontSettings().relativeLineSpacing() == 100) {
+    if (globalFontSettings().lineSpacing() == 100) {
         m_textWrappingAction->setEnabled(q);
     } else {
         m_textWrappingAction->setEnabled(false);
@@ -5129,7 +5129,7 @@ QRect TextEditorWidgetPrivate::foldBox()
     QRectF er = q->blockBoundingGeometry(end).translated(q->contentOffset());
 
 
-    if (TextEditorSettings::fontSettings().relativeLineSpacing() == 100) {
+    if (globalFontSettings().lineSpacing() == 100) {
         return QRect(m_extraArea->width() - foldBoxWidth(q->fontMetrics()),
                      int(br.top()),
                      foldBoxWidth(q->fontMetrics()),
@@ -5381,7 +5381,7 @@ void TextEditorWidgetPrivate::resetCursorFlashTimer()
 
 void TextEditorWidgetPrivate::updateCursorSelections()
 {
-    const QTextCharFormat selectionFormat = TextEditorSettings::fontSettings().toTextCharFormat(
+    const QTextCharFormat selectionFormat = globalFontSettings().data().toTextCharFormat(
         C_SELECTION);
     QList<QTextEdit::ExtraSelection> selections;
     for (const QTextCursor &cursor : m_cursors) {
@@ -5561,10 +5561,10 @@ bool TextEditorWidgetPrivate::updateAnnotationBounds(const QTextBlock &block,
 
     int additionalHeight = 0;
     if (additionalHeightNeeded) {
-        if (TextEditorSettings::fontSettings().relativeLineSpacing() == 100)
+        if (globalFontSettings().lineSpacing() == 100)
             additionalHeight = q->fontMetrics().lineSpacing();
         else
-            additionalHeight = TextEditorSettings::fontSettings().lineSpacing();
+            additionalHeight = globalFontSettings().data().lineSpacing();
     }
 
     if (TextBlockUserData::additionalAnnotationHeight(block) == additionalHeight)
@@ -5609,7 +5609,7 @@ void TextEditorWidgetPrivate::updateLineAnnotation(const PaintEventData &data,
     });
 
     qreal itemOffset = 0.0;
-    if (TextEditorSettings::fontSettings().relativeLineSpacing() == 100)
+    if (globalFontSettings().lineSpacing() == 100)
         itemOffset = q->fontMetrics().lineSpacing();
     else
         itemOffset = blockData.boundingRect.height();
@@ -5669,7 +5669,7 @@ void TextEditorWidgetPrivate::updateLineAnnotation(const PaintEventData &data,
         scheduleCleanupAnnotationCache();
 }
 
-QColor blendRightMarginColor(const FontSettings &settings, bool areaColor)
+QColor blendRightMarginColor(const FontSettingsData &settings, bool areaColor)
 {
     const QColor baseColor = settings.toTextCharFormat(C_TEXT).background().color();
     const QColor col = (baseColor.value() > 128) ? Qt::black : Qt::white;
@@ -6642,10 +6642,10 @@ int TextEditorWidget::extraAreaWidth(int *markWidthPtr) const
     int markWidth = 0;
 
     if (d->m_marksVisible) {
-        if (TextEditorSettings::fontSettings().relativeLineSpacing() == 100)
+        if (globalFontSettings().lineSpacing() == 100)
             markWidth += fm.lineSpacing() + 2;
         else
-            markWidth += TextEditorSettings::fontSettings().lineSpacing() + 2;
+            markWidth += globalFontSettings().data().lineSpacing() + 2;
 
 //     if (documentLayout->doubleMarkCount)
 //         markWidth += fm.lineSpacing() / 3;
@@ -6660,7 +6660,7 @@ int TextEditorWidget::extraAreaWidth(int *markWidthPtr) const
     space += 4;
 
     if (d->m_codeFoldingVisible) {
-        if (TextEditorSettings::fontSettings().relativeLineSpacing() == 100)
+        if (globalFontSettings().lineSpacing() == 100)
             space += foldBoxWidth(fm);
         else
             space += foldBoxWidth();
@@ -6752,8 +6752,8 @@ struct Internal::ExtraAreaPaintEventData
               editor->textDocument()->fontSettings().toTextCharFormat(C_CURRENT_LINE_NUMBER))
         , palette(d->m_extraArea->palette())
     {
-        if (TextEditorSettings::fontSettings().relativeLineSpacing() != 100) {
-            lineSpacing = TextEditorSettings::fontSettings().lineSpacing();
+        if (globalFontSettings().lineSpacing() != 100) {
+            lineSpacing = globalFontSettings().data().lineSpacing();
             collapseColumnWidth = d->m_codeFoldingVisible ? foldBoxWidth() : 0;
             markWidth = d->m_marksVisible ? lineSpacing : 0;
         }
@@ -6925,7 +6925,7 @@ void TextEditorWidgetPrivate::paintCodeFolding(QPainter &painter,
             && blockNumber <= extraAreaHighlightFoldEndBlockNumber;
 
     int boxWidth = 0;
-    if (TextEditorSettings::fontSettings().relativeLineSpacing() == 100)
+    if (globalFontSettings().lineSpacing() == 100)
         boxWidth = foldBoxWidth(data.fontMetrics);
     else
         boxWidth = foldBoxWidth();
@@ -7672,7 +7672,7 @@ void TextEditorWidget::extraAreaLeaveEvent(QEvent *)
 static bool xIsInsideFoldingRegion(int x, int extraAreaWidth, const QFontMetrics &fm)
 {
     int boxWidth = 0;
-    if (TextEditorSettings::fontSettings().relativeLineSpacing() == 100)
+    if (globalFontSettings().lineSpacing() == 100)
         boxWidth = foldBoxWidth(fm);
     else
         boxWidth = foldBoxWidth();
@@ -7810,7 +7810,7 @@ void TextEditorWidget::extraAreaMouseEvent(QMouseEvent *e)
     if (e->type() == QEvent::MouseButtonPress || e->type() == QEvent::MouseButtonDblClick) {
         if (e->button() == Qt::LeftButton) {
             int boxWidth = 0;
-            if (TextEditorSettings::fontSettings().relativeLineSpacing() == 100)
+            if (globalFontSettings().lineSpacing() == 100)
                 boxWidth = foldBoxWidth(fontMetrics());
             else
                 boxWidth = foldBoxWidth();
@@ -8349,7 +8349,7 @@ void TextEditorWidgetPrivate::adjustScrollBarRanges()
 {
     if (!m_highlightScrollBarController)
         return;
-    const double lineSpacing = TextEditorSettings::fontSettings().lineSpacing();
+    const double lineSpacing = globalFontSettings().data().lineSpacing();
     if (lineSpacing == 0)
         return;
 
@@ -9387,7 +9387,7 @@ void TextEditorWidget::triggerPendingUpdates()
 void TextEditorWidget::applyFontSettings()
 {
     d->m_fontSettingsNeedsApply = false;
-    const FontSettings &fs = textDocument()->fontSettings();
+    const FontSettingsData &fs = textDocument()->fontSettings();
     const QTextCharFormat textFormat = fs.toTextCharFormat(C_TEXT);
     const QTextCharFormat lineNumberFormat = fs.toTextCharFormat(C_LINE_NUMBER);
     QFont font(textFormat.font());
@@ -9424,7 +9424,7 @@ void TextEditorWidget::applyFontSettings()
 
 void TextEditorWidget::setDisplaySettings(const DisplaySettingsData &ds)
 {
-    const TextEditor::FontSettings &fs = TextEditorSettings::fontSettings();
+    const TextEditor::FontSettingsData fs = globalFontSettings().data();
     if (fs.relativeLineSpacing() == 100)
         setLineWrapMode(ds.m_textWrapping ? PlainTextEdit::WidgetWidth : PlainTextEdit::NoWrap);
     else
@@ -9994,7 +9994,7 @@ QColor TextEditorWidget::replacementPenColor(int blockNumber) const
 void TextEditorWidget::setupFallBackEditor(Id id)
 {
     TextDocumentPtr doc(new TextDocument(id));
-    doc->setFontSettings(TextEditorSettings::fontSettings());
+    doc->setFontSettings(globalFontSettings().data());
     setTextDocument(doc);
 }
 

@@ -226,7 +226,7 @@ void addModifiers(int key,
                   QHash<int, QTextCharFormat> *formatHash,
                   TextStyles styles,
                   QList<int> tokenModifiers,
-                  const TextEditor::FontSettings &fs)
+                  const TextEditor::FontSettingsData &fs)
 {
     if (tokenModifiers.isEmpty())
         return;
@@ -263,7 +263,7 @@ void SemanticTokenSupport::setLegend(const LanguageServerProtocol::SemanticToken
 
 void SemanticTokenSupport::updateFormatHash()
 {
-    auto fontSettings = TextEditorSettings::fontSettings();
+    auto fontSettings = globalFontSettings().data();
     for (int tokenType : std::as_const(m_tokenTypes)) {
         if (tokenType < 0)
             continue;

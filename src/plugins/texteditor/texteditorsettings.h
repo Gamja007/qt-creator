@@ -4,7 +4,6 @@
 #pragma once
 
 #include "commentssettings.h"
-#include "displaysettings.h"
 #include "texteditor_global.h"
 
 #include <utils/id.h>
@@ -20,7 +19,7 @@ QT_END_NAMESPACE
 
 namespace TextEditor {
 
-class FontSettings;
+class FontSettingsData;
 class TypingSettingsData;
 class StorageSettingsData;
 class BehaviorSettingsData;
@@ -48,18 +47,13 @@ public:
 
     static TextEditorSettings *instance();
 
-    static FontSettings fontSettings();
-
-    static void setCommentsSettingsRetriever(
-        const std::function<CommentsSettings::Data(const Utils::FilePath &)> &);
-    static CommentsSettings::Data commentsSettings(const Utils::FilePath &filePath);
+    static FontSettingsData fontSettings();
 
     static ICodeStylePreferencesFactory *codeStyleFactory(Utils::Id languageId);
     static const QMap<Utils::Id, ICodeStylePreferencesFactory *> &codeStyleFactories();
     static void registerCodeStyleFactory(ICodeStylePreferencesFactory *codeStyleFactory);
     static void unregisterCodeStyleFactory(Utils::Id languageId);
 
-    static CodeStylePool *codeStylePool();
     static CodeStylePool *codeStylePool(Utils::Id languageId);
     static void registerCodeStylePool(Utils::Id languageId, CodeStylePool *pool);
     static void unregisterCodeStylePool(Utils::Id languageId);
@@ -78,7 +72,7 @@ public:
     static void resetFontZoom();
 
 signals:
-    void fontSettingsChanged(const TextEditor::FontSettings &);
+    void fontSettingsChanged(const TextEditor::FontSettingsData &);
     void typingSettingsChanged(const TextEditor::TypingSettingsData &);
     void storageSettingsChanged(const TextEditor::StorageSettingsData &);
     void behaviorSettingsChanged(const TextEditor::BehaviorSettingsData &);
