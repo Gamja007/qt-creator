@@ -6,10 +6,7 @@
 #include "utils_global.h"
 
 #include "fancylineedit.h"
-#include "filepath.h"
 #include "lazy.h"
-
-#include <QWidget>
 
 QT_BEGIN_NAMESPACE
 class QAbstractButton;
@@ -19,22 +16,15 @@ QT_END_NAMESPACE
 namespace Utils {
 
 class CommandLine;
-class MacroExpander;
 class Environment;
+class FilePath;
+class FilePaths;
+class MacroExpander;
 class PathChooserPrivate;
 
 class QTCREATOR_UTILS_EXPORT PathChooser : public QWidget
 {
     Q_OBJECT
-    Q_PROPERTY(QString path READ path WRITE setPath NOTIFY textChanged DESIGNABLE true)
-    Q_PROPERTY(QString promptDialogTitle READ promptDialogTitle WRITE setPromptDialogTitle DESIGNABLE true)
-    Q_PROPERTY(QString promptDialogFilter READ promptDialogFilter WRITE setPromptDialogFilter DESIGNABLE true)
-    Q_PROPERTY(Kind expectedKind READ expectedKind WRITE setExpectedKind DESIGNABLE true)
-    Q_PROPERTY(Utils::FilePath baseDirectory READ baseDirectory WRITE setBaseDirectory DESIGNABLE true)
-    Q_PROPERTY(QStringList commandVersionArguments READ commandVersionArguments WRITE setCommandVersionArguments)
-    Q_PROPERTY(bool readOnly READ isReadOnly WRITE setReadOnly DESIGNABLE true)
-    // Designer does not know this type, so force designable to false:
-    Q_PROPERTY(Utils::FilePath filePath READ filePath WRITE setFilePath DESIGNABLE false)
 
 public:
     static QString browseButtonLabel();
@@ -143,7 +133,6 @@ public:
 
     void setValueAlternatives(const FilePaths &candidates);
 
-public slots:
     void setPath(const QString &);
     void setFilePath(const FilePath &);
 
@@ -157,10 +146,6 @@ signals:
     void returnPressed();
 
 private:
-    // Deprecated, only used in property getter.
-    // Use filePath().toString() or better suitable conversions.
-    QString path() const { return filePath().toUrlishString(); }
-
     // Returns overridden title or the one from <title>
     QString makeDialogTitle(const QString &title);
     void slotBrowse(bool remote);

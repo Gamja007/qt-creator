@@ -21,9 +21,9 @@
 #include <texteditor/codestyleselectorwidget.h>
 #include <texteditor/icodestylepreferencesfactory.h>
 #include <texteditor/indenter.h>
-#include <texteditor/texteditorsettings.h>
 #include <utils/filepath.h>
 #include <utils/fileutils.h>
+#include <utils/shutdownguard.h>
 
 #include <QInputDialog>
 #include <QMessageBox>
@@ -59,13 +59,6 @@ private:
 class ClangFormatCodeStyleEditor final : public CodeStyleEditor
 {
 public:
-    static ClangFormatCodeStyleEditor *create(
-        const ICodeStylePreferencesFactory *factory,
-        const FilePath &projectFile,
-        ICodeStylePreferences *codeStyle,
-        QWidget *parent);
-
-private:
     ClangFormatCodeStyleEditor(QWidget *parent);
 
     void init(
@@ -230,17 +223,6 @@ void ClangFormatCodeStyleEditorWidget::finish()
     m_clangFormatSettings->apply();
 }
 
-ClangFormatCodeStyleEditor *ClangFormatCodeStyleEditor::create(
-    const ICodeStylePreferencesFactory *factory,
-    const FilePath &projectFile,
-    ICodeStylePreferences *codeStyle,
-    QWidget *parent)
-{
-    auto editor = new ClangFormatCodeStyleEditor{parent};
-    editor->init(factory, projectFile, codeStyle);
-    return editor;
-}
-
 ClangFormatCodeStyleEditor::ClangFormatCodeStyleEditor(QWidget *parent)
     : CodeStyleEditor{parent}
 {}
@@ -319,19 +301,18 @@ QString ClangFormatCodeStyleEditor::snippetProviderGroupId() const
 class ClangFormatCodeStylePreferencesFactory final : public ICodeStylePreferencesFactory
 {
 public:
-    ClangFormatCodeStylePreferencesFactory() = default;
+    ClangFormatCodeStylePreferencesFactory()
+        : ICodeStylePreferencesFactory(CppEditor::Constants::CPP_SETTINGS_ID)
+    {}
 
     CodeStyleEditorWidget *createCodeStyleEditor(
             const FilePath &projectFile,
             ICodeStylePreferences *codeStyle,
             QWidget *parent = nullptr) const override
     {
-        return ClangFormatCodeStyleEditor::create(this, projectFile, codeStyle, parent);
-    }
-
-    Id languageId() override
-    {
-        return CppEditor::Constants::CPP_SETTINGS_ID;
+        auto editor = new ClangFormatCodeStyleEditor{parent};
+        editor->init(this, projectFile, codeStyle);
+        return editor;
     }
 
     QString displayName() override { return Tr::tr("C++"); }
@@ -347,17 +328,10 @@ public:
     }
 };
 
-void setupCodeStyleFactory(QObject *guard)
+void setupCodeStyleFactory()
 {
-    static ClangFormatCodeStylePreferencesFactory theClangFormatStyleFactory;
-
-    // Replace the default one.
-    const Id factoryId = theClangFormatStyleFactory.languageId();
-    TextEditorSettings::unregisterCodeStyleFactory(factoryId);
-    TextEditorSettings::registerCodeStyleFactory(&theClangFormatStyleFactory);
-    QObject::connect(guard, &QObject::destroyed, [=] {
-        TextEditorSettings::unregisterCodeStyleFactory(factoryId);
-    });
+    // Replace the default one by overwriting it with this here which has the same ID.
+    static GuardedObject<ClangFormatCodeStylePreferencesFactory> theClangFormatStyleFactory;
 }
 
 } // namespace ClangFormat

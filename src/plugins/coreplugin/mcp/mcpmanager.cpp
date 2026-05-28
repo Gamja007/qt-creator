@@ -12,7 +12,9 @@
 #include <solutions/spinner/spinner.h>
 
 #include <utils/algorithm.h>
+#include <utils/aspectlist.h>
 #include <utils/aspects.h>
+#include <utils/environmentchangesaspect.h>
 #include <utils/async.h>
 #include <utils/globaltasktree.h>
 #include <utils/layoutbuilder.h>

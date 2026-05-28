@@ -80,7 +80,9 @@ private:
 class CppCodeStylePreferencesFactory final : public ICodeStylePreferencesFactory
 {
 public:
-    CppCodeStylePreferencesFactory() = default;
+    CppCodeStylePreferencesFactory()
+        : ICodeStylePreferencesFactory(Constants::CPP_SETTINGS_ID)
+    {}
 
 private:
     CodeStyleEditorWidget *createCodeStyleEditor(
@@ -92,8 +94,6 @@ private:
         editor->init(this, projectFile, codeStyle);
         return editor;
     }
-
-    Utils::Id languageId() final { return Constants::CPP_SETTINGS_ID; }
 
     QString displayName() final { return Tr::tr(Constants::CPP_SETTINGS_NAME); }
 
@@ -115,18 +115,12 @@ public:
     ~CppToolsSettings() final;
 
     CppCodeStylePreferencesFactory m_factory;
-    CodeStylePool m_pool{&m_factory};
+    CodeStylePool m_pool{&m_factory, Constants::CPP_SETTINGS_ID};
 };
 
 CppToolsSettings::CppToolsSettings()
 {
     qRegisterMetaType<CppCodeStyleSettings>("CppEditor::CppCodeStyleSettings");
-
-    // code style factory
-    TextEditorSettings::registerCodeStyleFactory(&m_factory);
-
-    // code style pool
-    TextEditorSettings::registerCodeStylePool(Constants::CPP_SETTINGS_ID, &m_pool);
 
     // global code style settings
     g_globalCodeStyle = new CppCodeStylePreferences(this);
@@ -215,8 +209,6 @@ CppToolsSettings::CppToolsSettings()
 CppToolsSettings::~CppToolsSettings()
 {
     TextEditorSettings::unregisterCodeStyle(Constants::CPP_SETTINGS_ID);
-    TextEditorSettings::unregisterCodeStylePool(Constants::CPP_SETTINGS_ID);
-    TextEditorSettings::unregisterCodeStyleFactory(Constants::CPP_SETTINGS_ID);
 
     delete g_globalCodeStyle;
     g_globalCodeStyle = nullptr;

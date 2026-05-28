@@ -18,6 +18,7 @@ add_qtc_library(Utils
     appinfo.cpp appinfo.h
     appmainwindow.cpp appmainwindow.h
     array.h
+    aspectlist.cpp aspectlist.h
     aspects.cpp aspects.h
     async.cpp async.h
     basetreeview.cpp basetreeview.h
@@ -51,6 +52,7 @@ add_qtc_library(Utils
     elfreader.cpp elfreader.h
     elidinglabel.cpp elidinglabel.h
     environment.cpp environment.h
+    environmentchangesaspect.cpp environmentchangesaspect.h
     environmentdialog.cpp environmentdialog.h
     environmentmodel.cpp environmentmodel.h
     environmentfwd.h

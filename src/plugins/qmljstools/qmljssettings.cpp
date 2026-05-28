@@ -1245,7 +1245,7 @@ public:
 
         auto vbox = new QVBoxLayout(this);
         vbox->addWidget(
-            TextEditorSettings::codeStyleFactory(QmlJSTools::Constants::QML_JS_SETTINGS_ID)
+            codeStyleFactory(QmlJSTools::Constants::QML_JS_SETTINGS_ID)
                 ->createCodeStyleEditor({}, &m_preferences));
     }
 
@@ -1318,7 +1318,9 @@ private:
 class QmlJSCodeStylePreferencesFactory final : public ICodeStylePreferencesFactory
 {
 public:
-    QmlJSCodeStylePreferencesFactory() = default;
+    QmlJSCodeStylePreferencesFactory()
+        : ICodeStylePreferencesFactory(Constants::QML_JS_SETTINGS_ID)
+    {}
 
 private:
     CodeStyleEditorWidget *createCodeStyleEditor(
@@ -1329,11 +1331,6 @@ private:
         auto editor = new QmlJsCodeStyleEditor{parent};
         editor->init(this, projectFile, codeStyle);
         return editor;
-    }
-
-    Utils::Id languageId() final
-    {
-        return Constants::QML_JS_SETTINGS_ID;
     }
 
     QString displayName() final
@@ -1361,15 +1358,12 @@ public:
     ~QmlJSToolsSettings() final;
 
     QmlJSCodeStylePreferencesFactory m_factory;
-    CodeStylePool m_pool{&m_factory};
+    CodeStylePool m_pool{&m_factory, Constants::QML_JS_SETTINGS_ID};
     QmlJSCodeStylePreferences m_globalCodeStyle;
 };
 
 QmlJSToolsSettings::QmlJSToolsSettings()
 {
-    TextEditorSettings::registerCodeStyleFactory(&m_factory);
-    TextEditorSettings::registerCodeStylePool(Constants::QML_JS_SETTINGS_ID, &m_pool);
-
     m_globalCodeStyle.setDelegatingPool(&m_pool);
     m_globalCodeStyle.setDisplayName(Tr::tr("Global", "Settings"));
     m_globalCodeStyle.setId(idKey);
@@ -1394,7 +1388,7 @@ QmlJSToolsSettings::QmlJSToolsSettings()
         const Utils::Result<QByteArray> fileContents = qmlformatIniPath.fileContents();
         if (fileContents)
             s.qmlformatIniContent = QString::fromUtf8(*fileContents);
-        auto csPool = TextEditorSettings::codeStylePool(QmlJSTools::Constants::QML_JS_SETTINGS_ID);
+        auto csPool = codeStylePool(QmlJSTools::Constants::QML_JS_SETTINGS_ID);
         QTC_ASSERT(csPool, return);
         auto builtInCodeStyles = csPool->builtInCodeStyles();
         for (auto codeStyle : builtInCodeStyles) {
@@ -1421,8 +1415,6 @@ QmlJSToolsSettings::QmlJSToolsSettings()
 QmlJSToolsSettings::~QmlJSToolsSettings()
 {
     TextEditorSettings::unregisterCodeStyle(QmlJSTools::Constants::QML_JS_SETTINGS_ID);
-    TextEditorSettings::unregisterCodeStylePool(QmlJSTools::Constants::QML_JS_SETTINGS_ID);
-    TextEditorSettings::unregisterCodeStyleFactory(QmlJSTools::Constants::QML_JS_SETTINGS_ID);
 }
 
 static QmlJSToolsSettings &toolsSettings()
