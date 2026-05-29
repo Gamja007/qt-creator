@@ -34,6 +34,8 @@
 #include <utils/mimeconstants.h>
 #include <utils/utilsicons.h>
 
+#include <QDirIterator>
+
 using namespace CppEditor;
 using namespace CPlusPlus;
 using namespace LanguageClient;
@@ -170,7 +172,7 @@ public:
     ClangdCompletionAssistProcessor(ClangdClient *client,
                                     const IAssistProvider *provider,
                                     const QString &snippetsGroup);
-    ~ClangdCompletionAssistProcessor();
+    ~ClangdCompletionAssistProcessor() override;
 
 private:
     IAssistProposal *perform() override;
